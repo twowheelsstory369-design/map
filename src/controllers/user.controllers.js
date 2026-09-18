@@ -252,8 +252,20 @@ const logoutUser = async (req, res, next) => {
   }
 };
 
+const getCurrentUser = async (req, res, next) => {
+  try {
+    return res.status(200).json({
+      user: req.user,
+      message: "Current user fetched successfully",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export {
   registerUser,
   loginUser,
   logoutUser,
+  getCurrentUser
 };
