@@ -94,17 +94,27 @@ const registerUser = async (req, res, next) => {
 
 const loginUser = async (req, res, next) => {
   try {
-    const { email, password } = req.body;
+    const {
+      email,
+      password,
+      deviceId,
+    } = req.body;
 
-    // Check required fields
-    if (!email || !password) {
+    // ==========================================
+    // CHECK REQUIRED FIELDS
+    // ==========================================
+
+    if (!email || !password || !deviceId) {
       throw new ApiError(
         400,
-        "Email and password are required",
+        "Email, password and deviceId are required",
       );
     }
 
-    // Find user
+    // ==========================================
+    // FIND USER
+    // ==========================================
+
     const user = await User.findOne({ email });
 
     if (!user) {
@@ -114,7 +124,10 @@ const loginUser = async (req, res, next) => {
       );
     }
 
-    // Check password
+    // ==========================================
+    // CHECK PASSWORD
+    // ==========================================
+
     const isPasswordValid =
       await user.isPasswordCorrect(password);
 
@@ -125,60 +138,152 @@ const loginUser = async (req, res, next) => {
       );
     }
 
+    const now = new Date();
+
     // ==========================================
-    // CHECK ACTIVE SESSION LIMIT
+    // CHECK EXISTING ACTIVE SESSION
     // ==========================================
 
-    const activeSessions = await Session.countDocuments({
+    const existingSession = await Session.findOne({
+      userId: user._id,
       expiresAt: {
-        $gt: new Date(),
+        $gt: now,
       },
     });
 
-    console.log(
-      `Active login sessions: ${activeSessions}`,
-    );
+    // ==========================================
+    // USER ALREADY ACTIVE
+    // ==========================================
 
-    if (activeSessions >= 10) {
-      throw new ApiError(
-        403,
-        "Login limit reached. Only 10 devices can be logged in at a time.",
+    if (existingSession) {
+      // ------------------------------------------
+      // DIFFERENT DEVICE → REJECT
+      // ------------------------------------------
+
+      if (existingSession.deviceId !== deviceId) {
+        throw new ApiError(
+          403,
+          "This account is already active on another device. Please log out from that device first.",
+        );
+      }
+
+      // ------------------------------------------
+      // SAME DEVICE → ALLOW
+      // ------------------------------------------
+
+      console.log(
+        `User ${user._id} is logging in again from the same device.`,
       );
     }
 
     // ==========================================
-    // GENERATE TOKENS
+    // CHECK MAXIMUM 10 ACTIVE USERS
+    // ==========================================
+    //
+    // IMPORTANT:
+    // We only need to perform this check when
+    // this is a NEW active user.
+    //
+    // If the user already has a session on the
+    // same device, they are already counted.
+    // ==========================================
+
+    if (!existingSession) {
+      const activeUserIds = await Session.distinct(
+        "userId",
+        {
+          expiresAt: {
+            $gt: now,
+          },
+        },
+      );
+
+      console.log(
+        `Active users: ${activeUserIds.length}`,
+      );
+
+      if (activeUserIds.length >= 10) {
+        throw new ApiError(
+          403,
+          "Login limit reached. Only 10 users can be active at a time.",
+        );
+      }
+    }
+
+    // ==========================================
+    // GENERATE NEW TOKENS
     // ==========================================
 
     const {
       accessToken,
       refreshToken,
-    } = await generateAccessAndRefreshToken(user._id);
+    } = await generateAccessAndRefreshToken(
+      user._id,
+    );
 
     // ==========================================
-    // CREATE NEW LOGIN SESSION
+    // SESSION EXPIRATION
     // ==========================================
 
     const expiresAt = new Date(
       Date.now() + 1 * 24 * 60 * 60 * 1000,
     );
 
-    await Session.create({
-      userId: user._id,
-      refreshToken,
-      expiresAt,
-    });
+    // ==========================================
+    // CREATE OR UPDATE SESSION
+    // ==========================================
 
-    // Remove sensitive information
+    if (existingSession) {
+      // Same device:
+      // reuse the existing session document
+      // but rotate the refresh token.
+
+      existingSession.refreshToken =
+        refreshToken;
+
+      existingSession.expiresAt =
+        expiresAt;
+
+      await existingSession.save();
+    } else {
+      // New user:
+      // create a new session.
+
+      await Session.create({
+        userId: user._id,
+        deviceId,
+        refreshToken,
+        expiresAt,
+      });
+    }
+
+    // ==========================================
+    // GET SAFE USER
+    // ==========================================
+
     const loggedInUser = await User.findById(
       user._id,
     ).select("-password -refreshToken");
 
-    // Cookie options
+    if (!loggedInUser) {
+      throw new ApiError(
+        500,
+        "Something went wrong while fetching logged in user",
+      );
+    }
+
+    // ==========================================
+    // COOKIE OPTIONS
+    // ==========================================
+
     const options = {
       httpOnly: true,
       secure: true,
     };
+
+    // ==========================================
+    // RESPONSE
+    // ==========================================
 
     return res
       .status(200)
@@ -200,6 +305,7 @@ const loginUser = async (req, res, next) => {
         },
         message: "User logged in successfully",
       });
+
   } catch (error) {
     console.error(
       `Error in loginUser controller: ${error.message}`,

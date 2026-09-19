@@ -6,6 +6,13 @@ const sessionSchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
+      index: true,
+    },
+
+    deviceId: {
+      type: String,
+      required: true,
+      index: true,
     },
 
     refreshToken: {
@@ -16,7 +23,6 @@ const sessionSchema = new Schema(
     expiresAt: {
       type: Date,
       required: true,
-      // Don't put index: true here
     },
   },
   {
@@ -29,6 +35,12 @@ sessionSchema.index(
   { expiresAt: 1 },
   { expireAfterSeconds: 0 },
 );
+
+// Useful for user + device lookups
+sessionSchema.index({
+  userId: 1,
+  deviceId: 1,
+});
 
 export const Session = mongoose.model(
   "Session",
