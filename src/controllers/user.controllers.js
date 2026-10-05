@@ -226,7 +226,7 @@ const loginUser = async (req, res, next) => {
     // ==========================================
 
     const expiresAt = new Date(
-      Date.now() + 1 * 24 * 60 * 60 * 1000,
+      Date.now() + 5 * 60 * 1000,
     );
 
     // ==========================================
@@ -358,6 +358,106 @@ const logoutUser = async (req, res, next) => {
   }
 };
 
+// ==========================================
+// Change Password
+// ==========================================
+
+const changePassword = async (req, res, next) => {
+  try {
+    const { newPassword } = req.body;
+
+    // ==========================================
+    // CHECK REQUIRED FIELDS
+    // ==========================================
+
+    if ( !newPassword) {
+      throw new ApiError(
+        400,
+        "Current password and new password are required",
+      );
+    }
+
+    // ==========================================
+    // CHECK NEW PASSWORD
+    // ==========================================
+
+    if (newPassword.length < 6) {
+      throw new ApiError(
+        400,
+        "New password must be at least 6 characters long",
+      );
+    }
+
+    // ==========================================
+    // FIND USER
+    // ==========================================
+
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      throw new ApiError(
+        404,
+        "User not found",
+      );
+    }
+
+    // ==========================================
+    // MAKE SURE NEW PASSWORD IS DIFFERENT
+    // ==========================================
+
+    const isSamePassword =
+      await user.isPasswordCorrect(newPassword);
+
+    if (isSamePassword) {
+      throw new ApiError(
+        400,
+        "New password must be different from current password",
+      );
+    }
+
+    // ==========================================
+    // UPDATE PASSWORD
+    // ==========================================
+
+    user.password = newPassword;
+
+    await user.save();
+
+    // ==========================================
+    // INVALIDATE ALL ACTIVE SESSIONS
+    // ==========================================
+
+    await Session.deleteMany({
+      userId: user._id,
+    });
+
+    // ==========================================
+    // CLEAR CURRENT COOKIES
+    // ==========================================
+
+    const options = {
+      httpOnly: true,
+      secure: true,
+    };
+
+    // ==========================================
+    // RESPONSE
+    // ==========================================
+
+    return res
+      .status(200)
+      .clearCookie("accessToken", options)
+      .clearCookie("refreshToken", options)
+      .json({
+        message:
+          "Password changed successfully. Please log in again.",
+      });
+
+  } catch (error) {
+    next(error);
+  }
+};
+
 const getCurrentUser = async (req, res, next) => {
   try {
     return res.status(200).json({
@@ -373,5 +473,6 @@ export {
   registerUser,
   loginUser,
   logoutUser,
-  getCurrentUser
+  getCurrentUser,
+  changePassword
 };
