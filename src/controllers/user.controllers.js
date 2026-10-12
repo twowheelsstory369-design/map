@@ -202,7 +202,7 @@ const loginUser = async (req, res, next) => {
         `Active users: ${activeUserIds.length}`,
       );
 
-      if (activeUserIds.length >= 10) {
+      if (activeUserIds.length >= 15) {
         throw new ApiError(
           403,
           "Login limit reached. Only 10 users can be active at a time.",
